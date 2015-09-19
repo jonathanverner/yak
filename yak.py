@@ -242,7 +242,7 @@ def build_web_tree(path, base_dir='./sources',default_template_base='base',paren
                 logger.warn("Multiple index files in "+path)
             position = position + 1
             index = load_file(ipath)
-            tree["Meta"].update(index['Meta'])
+            tree['Meta'].update(index['Meta'])
             tree['Format'] = index['Format']
             tree['Content'] = index['Content']
             have_index = True
@@ -329,7 +329,6 @@ def meta_dir_format(val,meta):
         pattern = os.path.basename(val)
         dirname = './'+os.path.dirname(val)
         return [f for f in os.listdir(dirname) if re.match(pattern,f)]
-
 
 META_FORMATS = {
     'dir':meta_dir_format,
@@ -468,7 +467,7 @@ def render_node(node,global_ctx):
         formated_content = formatter(node['Content'],node_context)
     except Exception, e:
         logger.error("Unable to format content of " + node['Name'] + " Exception:" + str(e))
-        logger.warn("Offending content:",node['Content'])
+        logger.warn("Offending content:" + node['Content'])
         formated_content = node['Content']
     if node['Meta']['Template'] == 'None':
         return formated_content
@@ -486,6 +485,7 @@ def process_tree(tree,global_ctx={},dest_path='./website',dry_run=False):
     if not dry_run and not tree.get('Virtual',False):
         if not os.path.isdir(dest_path):
             mkdir_p(dest_path)
+        logger.info("Writing "+index_path)
         open(index_path,'w').write(index.encode('utf-8'))
     for child in tree['Children']:
         if child.get("Type","page") == 'index':
