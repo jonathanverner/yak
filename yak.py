@@ -417,7 +417,7 @@ CONTENT_FORMATS = {
 try:
     import markdown
 
-    def content_md_format(content,context,template):
+    def content_md_format(content,context):
         return markdown.markdown(content)
 
     CONTENT_FORMATS['md'] = content_md_format
