@@ -230,7 +230,7 @@ def build_web_tree(path, base_dir='./sources',default_template_base='base',paren
         "OutFile":"index.html",
         "Parent":parent,
         "Name":os.path.basename(path),
-        "URL":'/'+tpl_base.replace('.','/')+'/'
+        "URL":path[len(base_dir):]+'/',
     }
     position=0
     have_index = False
@@ -262,7 +262,7 @@ def build_web_tree(path, base_dir='./sources',default_template_base='base',paren
             child = load_file(npath)
             child['Position'] = position
             child['Parent'] = tree
-            child['URL'] = tree['URL']+'/'+child['Name']+'.html'
+            child['URL'] = tree['URL']+child['Name']+'.html'
             if 'Template' not in child['Meta']:
                 child['Meta']['Template'] = tree['Meta']['ChildTemplate']
             if type(child['Meta']['Template']) == type({}):
