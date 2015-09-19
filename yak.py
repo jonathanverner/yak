@@ -132,6 +132,11 @@ def asset_filter(env, value, asset_path, **kwargs):
         env.missing_assets[path]=True
     return path
 
+def doi_filter(value):
+    return 'http://dx.doi.org/'+value
+
+def split_filter(value,delimiter=","):
+    return value.split(delimiter)
 
 def equalto_test(a,b):
     return a == b
@@ -497,6 +502,8 @@ def main():
         cfg = json.load(open(args.config))
         jinja_env.filters['json']=json_filter
         jinja_env.filters['asset']=asset_filter
+        jinja_env.filters['DOI']=doi_filter
+        jinja_env.filters['split']=split_filter
         jinja_env.tests['equalto']=equalto_test
         jinja_env.tests['not equalto']=equalto_test
         jinja_env.loader=jinja2.FileSystemLoader(args.templates)
