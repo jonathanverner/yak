@@ -190,8 +190,8 @@ class webnode_list(list):
 
     def __getitem__(self, key):
         try:
-            return self[key]
-        except:
+            super(webnode_list,self).__getitem__(key)
+        except Exception, e:
             return self._map[key]
 
     def deep_copy(self,depth=3):
@@ -207,11 +207,8 @@ class webnode_list(list):
         self._map_item__(item)
 
     def extend(self,l):
-        old_len = len(self)
-        super(webnode_list,self).extend(l)
-        for i in range(old_len,len(self)):
-            self._map_item__(self[i])
-
+        for i in l:
+            self.append(i)
 
 
 def build_web_tree(path, base_dir='./sources',default_template_base='base',parent=None):
