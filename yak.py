@@ -231,6 +231,7 @@ def build_web_tree(path, base_dir='./sources',default_template_base='base',paren
         "Parent":parent,
         "Name":os.path.basename(path),
         "URL":path[len(base_dir):]+'/',
+        "Type":"index"
     }
     position=0
     have_index = False
@@ -487,7 +488,7 @@ def process_tree(tree,global_ctx={},dest_path='./website',dry_run=False):
             mkdir_p(dest_path)
         open(index_path,'w').write(index.encode('utf-8'))
     for child in tree['Children']:
-        if len(child['Children']) > 0:
+        if child.get("Type","page") == 'index':
             ch_path = os.path.join(dest_path,child['Name'])
         else:
             ch_path = dest_path
