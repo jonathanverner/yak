@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+# -*- coding:utf-8 -*-
+
 
 import os, sys, sha
 import posixpath
@@ -11,8 +13,20 @@ import subprocess
 logging.basicConfig()
 logger = logging.getLogger("wg")
 
+def resolve_attr(obj,attribute):
+    path = attribute.split('.')
+    for p in path:
+        if not hasattr(obj,p):
+            try:
+                obj = obj[p]
+            except:
+                return None
+        else:
+            obj = getattr(obj,p)
+    return obj
 
-def deep_copy(d,depth=3):
+
+def deep_copy(d,depth=4):
     if depth <= 0:
         return d
     if hasattr(d,"deep_copy"):
@@ -287,6 +301,100 @@ def build_web_tree(path, base_dir='./sources',default_template_base='base',paren
                     child['Children'].append(pg)
                 child['Virtual'] = True
             tree['Children'].append(child)
+    if 'GroupBy' in tree['Meta']:
+        print "TREE CHILDREN", len(tree['Children'])
+        subtrees = []
+        for (name,grouping) in tree['Meta']['GroupBy'].items():
+            group_subtree = {
+                'Name':name.lower(),
+                'URL':tree['URL']+name.lower()+'/',
+                "Type":"index",
+                "Parent":tree,
+                "Children":webnode_list([]),
+                "Content":tree["Content"],
+                "Format":tree["Format"],
+                "Meta":tree["Meta"],
+                "Virtual":True,
+                "OutFile":"index.html"
+            }
+            page_template = {
+                "Parent":group_subtree,
+                "Children":webnode_list([]),
+                "Content":tree["Content"],
+                "Format":tree["Format"],
+                "Meta":tree["Meta"],
+                "Group":{
+                    "Children":webnode_list([]),
+                    "First":False,
+                    "Last":False,
+                    "FirstURL":"",
+                    "LastURL":"",
+                    "PrevURL":"",
+                    "NextURL":""
+                }
+            }
+            all = deep_copy(page_template)
+            all["Name"]="all"
+            all["URL"]=tree['URL']+name.lower()+'/all'
+            all["OutFile"]="all.html"
+            for ch in tree['Children']:
+                nch = deep_copy(ch)
+                nch['Virtual']=True
+                all['Group']['Children'].append(nch)
+            group_subtree['Children'].append(all)
+            if grouping['Type'] == 'Size':
+                pg_size = grouping['PageSize']
+                num_pages = len(tree['Children'])/pg_size
+                if len(tree['Children']) % pg_size > 0:
+                    num_pages += 1
+                page_template["FirstURL"] = tree['URL']+name.lower()+'/1'
+                page_template["LastURL"] = tree['URL']+name.lower()+'/'+str(num_pages)
+                for pg in range(num_pages):
+                    pg_node = deep_copy(page_template)
+                    pg_node['Name']=str(pg)
+                    pg_node['URL']=tree['URL']+name.lower()+'/'+str(pg+1)
+                    pg_node['OutFile']=str(pg)+'.html'
+                    pg_node['Group']['Children'].extend(tree['Children'][pg*pg_size:(pg+1)*pg_size])
+                    if pg == 0:
+                        pg_node["First"]=True
+                    elif pg == (num_pages-1):
+                        pg_node["Last"]=True
+                    pg_node["PrevURL"] = tree['URL']+name.lower()+'/'+str(min(pg-1,1))
+                    pg_node["NextURL"] = tree['URL']+name.lower()+'/'+str(max(pg+1,pg_size))
+                    print pg_node['Name'], len(page_template['Group']['Children'])
+                    group_subtree['Children'].append(pg_node)
+            elif grouping['Type'] == 'Attribute':
+                attr = grouping['Attribute']
+                vals = set([])
+                for ch in tree['Children']:
+                    val = resolve_attr(ch,attr)
+                    if val is not None:
+                        if type(val) == type([]):
+                            vals.update(val)
+                        else:
+                            vals.add(val)
+                for pg in vals:
+                    pg_node = deep_copy(page_template)
+                    pg_node['Name']=unicode(pg).lower()
+                    pg_node['OutFile']=unicode(pg).lower()+'.html'
+                    pg_node['URL']=tree['URL']+name.lower()+'/'+unicode(pg).lower()
+                    for ch in tree['Children']:
+                        val = resolve_attr(ch,attr)
+                        if val is not None:
+                            if (type(val) == type([]) and pg in val) or (val == pg):
+                                nch = deep_copy(ch)
+                                nch['Virtual']=True
+                                pg_node['Group']['Children'].append(nch)
+                    group_subtree['Children'].append(pg_node)
+            subtrees.append(group_subtree)
+        print "TREE CHILDREN", len(tree['Children'])
+        tree['Group'] = {
+            'NoPagination':True,
+            'Children':tree['Children'],
+            'GenerateChildren':True,
+        }
+        tree['Children'] = subtrees
+
     return tree
 
 def meta_json_format(val,meta):
@@ -493,6 +601,10 @@ def process_tree(tree,global_ctx={},dest_path='./website',dry_run=False):
         else:
             ch_path = dest_path
         process_tree(child,global_ctx,ch_path,dry_run)
+    if 'Group' in tree and 'GenerateChildren' in tree['Group']:
+        for child in tree['Group']['Children']:
+            process_tree(child,global_ctx,dest_path,dry_run)
+
 
 def scan_assets(install_list):
     asset_list = {}
