@@ -119,6 +119,8 @@ def asset_filter(env, value, asset_path, **kwargs):
         path=asset_path+'/'+value
     else:
         path=asset_path
+    if 'cdn' in kwargs:
+        return env.config['cdn']+path
     if path in env.assets:
         if env.assets[path]['hash'] is None:
             h = hash(env.assets[path]['src'])
@@ -500,6 +502,7 @@ def main():
 
     if args.command == 'compile' or args.command == 'list-assets':
         cfg = json.load(open(args.config))
+        jinja_env.config = cfg
         jinja_env.filters['json']=json_filter
         jinja_env.filters['asset']=asset_filter
         jinja_env.filters['DOI']=doi_filter
