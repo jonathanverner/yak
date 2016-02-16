@@ -54,7 +54,19 @@ def pipe(program,input,cwd=None):
     p = subprocess.Popen(program, stdout=subprocess.PIPE,stdin=subprocess.PIPE,shell=True,cwd=cwd)
     return p.communicate(input)[0]
 
+try:
+    from scss import Scss
+    import os
+    compiler = Scss()
+    def sass_filter(bytes,cwd):
+        os.chdir(cwd)
+        return compiler.compile(bytes)
+except:
+    def sass_filter(bytes,cwd):
+        return pipe('sass --scss',bytes,cwd=cwd)
+
 INSTALL_FILTERS = {
+    'sass':sass_filter
 }
 
 def cp(src,dst,create_parents=False,filters=[]):
@@ -64,7 +76,7 @@ def cp(src,dst,create_parents=False,filters=[]):
     s=open(src).read()
     for f in filters:
         if f in INSTALL_FILTERS:
-            s = INSTALL_FILTERS[f](s)
+            s = INSTALL_FILTERS[f](s,cwd=src_dir)
         else:
             s = pipe(f,s,cwd=src_dir)
     open(dst,'w').write(s)
@@ -127,6 +139,20 @@ jinja_env.missing_assets={}
 def json_filter(value):
     return json.dumps(value)
 
+
+def get_asset_url(env, path):
+    if not path in env.assets:
+        logger.error("Asset '"+path+"' not found")
+        env.missing_assets[path]=True
+        return path
+    elif env.assets[path]['hash'] is None:
+        h = hash(env.assets[path]['src'])
+        env.assets[path]['hash'] = h
+        env.assets[path]['copy'] = True
+        return path + '?' + h
+    else:
+        return path + '?' + env.assets[path]['hash']
+
 @environmentfilter
 def asset_filter(env, value, asset_path, **kwargs):
     if len(value) > 0:
@@ -135,18 +161,51 @@ def asset_filter(env, value, asset_path, **kwargs):
         path=asset_path
     if 'cdn' in kwargs:
         return env.config['cdn']+path
-    if path in env.assets:
-        if env.assets[path]['hash'] is None:
-            h = hash(env.assets[path]['src'])
-            env.assets[path]['hash'] = h
-            env.assets[path]['copy'] = True
-            path = path +'?'+h
-        else:
-            path = path + '?' + env.assets[path]['hash']
-    else:
-        logger.error("Asset '"+path+"' not found")
-        env.missing_assets[path]=True
+    path = get_asset_url(env,path)
     return path
+
+HTML_ASSET_PATTERN = re.compile("""
+    (?P<full>(?P<attr>src\s*=\s*)(?P<quote>["'])
+    (?P<url>[^'"]*)["'])
+""", re.VERBOSE | re.IGNORECASE)
+def scan_html_for_assets(env,html):
+
+    def add_url_hash(match):
+        match = match.groupdict()
+        if match['url'].startswith('/'):
+            return match['attr']+match['quote'] + get_asset_url(env,match['url'])+match['quote']
+        elif match['url'].startswith('cdn://'):
+            return match['attr']+match['quote'] + env.config['cdn'] + match['url'][5:] +match['quote']
+        else:
+            return match['full']
+    return HTML_ASSET_PATTERN.sub(add_url_hash,html)
+
+def youtube_filter(video,playlist,width='"853"',height='"480"'):
+    return '<iframe width={width} height={height} src="https://www.youtube-nocookie.com/embed/{id}?list={playlist_id}&amp;showinfo=0" frameborder="0" allowfullscreen></iframe>'.format(id=video,playlist_id=playlist,width=width,height=height)
+
+def vimeo_filter(video,color=None,width="700px",height="394px",title=False,byline=False,portrait=False,frameborder="0",css_class=""):
+    attrs = {
+              'width':width,
+              'height':height,
+              'frameborder':frameborder,
+              "class":css_class
+              }
+    params = {
+              'title':'0',
+              'byline':'0',
+              'portrait':'0'
+             }
+    if title:
+        params['title']='1'
+    if byline:
+        params['byline']='1'
+    if color:
+        params['color']=color
+    if portrait:
+        params['portrait']=portrait
+    query_string='&'.join([str(key)+'='+str(val) for (key,val) in params.items()])
+    attr_string=' '.join([str(key)+'="'+str(val)+'"' for (key,val) in attrs.items()])
+    return '<iframe src="https://player.vimeo.com/video/{video_id}?{query_string}" {attr_string} webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe>'.format(video_id=video,query_string=query_string,attr_string=attr_string)
 
 def doi_filter(value):
     return 'http://dx.doi.org/'+value
@@ -302,8 +361,8 @@ def build_web_tree(path, base_dir='./sources',default_template_base='base',paren
                 child['Virtual'] = True
             tree['Children'].append(child)
     if 'GroupBy' in tree['Meta']:
-        print "TREE CHILDREN", len(tree['Children'])
         subtrees = []
+        index_page = None
         for (name,grouping) in tree['Meta']['GroupBy'].items():
             group_subtree = {
                 'Name':name.lower(),
@@ -324,7 +383,9 @@ def build_web_tree(path, base_dir='./sources',default_template_base='base',paren
                 "Format":tree["Format"],
                 "Meta":tree["Meta"],
                 "Group":{
+                    "Parent":tree,
                     "Children":webnode_list([]),
+                    "NumPages":0,
                     "First":False,
                     "Last":False,
                     "FirstURL":"",
@@ -335,7 +396,7 @@ def build_web_tree(path, base_dir='./sources',default_template_base='base',paren
             }
             all = deep_copy(page_template)
             all["Name"]="all"
-            all["URL"]=tree['URL']+name.lower()+'/all'
+            all["URL"]=tree['URL']+name.lower()+'/all.html'
             all["OutFile"]="all.html"
             for ch in tree['Children']:
                 nch = deep_copy(ch)
@@ -343,29 +404,35 @@ def build_web_tree(path, base_dir='./sources',default_template_base='base',paren
                 all['Group']['Children'].append(nch)
             group_subtree['Children'].append(all)
             if grouping['Type'] == 'Size':
+                if 'SortBy' in grouping:
+                    tree['Children'] = sorted(tree['Children'],key=lambda x:x['Meta']['Date'],reverse=True)
                 pg_size = grouping['PageSize']
                 num_pages = len(tree['Children'])/pg_size
                 if len(tree['Children']) % pg_size > 0:
                     num_pages += 1
-                page_template["FirstURL"] = tree['URL']+name.lower()+'/1'
-                page_template["LastURL"] = tree['URL']+name.lower()+'/'+str(num_pages)
+                page_template["Group"]["NumPages"] = num_pages
+                page_template["Group"]["FirstURL"] = tree['URL']+name.lower()+'/1.html'
+                page_template["Group"]["LastURL"] = tree['URL']+name.lower()+'/'+str(num_pages)+'.html'
                 for pg in range(num_pages):
                     pg_node = deep_copy(page_template)
-                    pg_node['Name']=str(pg)
+                    pg_node['Name']=str(pg+1)
                     pg_node['URL']=tree['URL']+name.lower()+'/'+str(pg+1)
-                    pg_node['OutFile']=str(pg)+'.html'
+                    pg_node['OutFile']=str(pg+1)+'.html'
                     pg_node['Group']['Children'].extend(tree['Children'][pg*pg_size:(pg+1)*pg_size])
                     if pg == 0:
-                        pg_node["First"]=True
-                    elif pg == (num_pages-1):
-                        pg_node["Last"]=True
-                    pg_node["PrevURL"] = tree['URL']+name.lower()+'/'+str(min(pg-1,1))
-                    pg_node["NextURL"] = tree['URL']+name.lower()+'/'+str(max(pg+1,pg_size))
-                    print pg_node['Name'], len(page_template['Group']['Children'])
+                        if index_page is None:
+                            index_page = pg_node
+                        pg_node["Group"]["First"]=True
+                    if pg == (num_pages-1):
+                        pg_node["Group"]["Last"]=True
+                    pg_node["Group"]["PrevURL"] = tree['URL']+name.lower()+'/'+str(max(pg,1))+'.html'
+                    pg_node["Group"]["NextURL"] = tree['URL']+name.lower()+'/'+str(min(pg+2,num_pages))+'.html'
                     group_subtree['Children'].append(pg_node)
             elif grouping['Type'] == 'Attribute':
                 attr = grouping['Attribute']
                 vals = set([])
+                if 'SortBy' in grouping:
+                    tree['Children'] = sorted(tree['Children'],key=lambda x:x['Meta']['Date'],reverse=True)
                 for ch in tree['Children']:
                     val = resolve_attr(ch,attr)
                     if val is not None:
@@ -375,6 +442,7 @@ def build_web_tree(path, base_dir='./sources',default_template_base='base',paren
                             vals.add(val)
                 for pg in vals:
                     pg_node = deep_copy(page_template)
+                    pg_node['Group']['NoPagination']=True
                     pg_node['Name']=unicode(pg).lower()
                     pg_node['OutFile']=unicode(pg).lower()+'.html'
                     pg_node['URL']=tree['URL']+name.lower()+'/'+unicode(pg).lower()
@@ -387,12 +455,10 @@ def build_web_tree(path, base_dir='./sources',default_template_base='base',paren
                                 pg_node['Group']['Children'].append(nch)
                     group_subtree['Children'].append(pg_node)
             subtrees.append(group_subtree)
-        print "TREE CHILDREN", len(tree['Children'])
         tree['Group'] = {
-            'NoPagination':True,
-            'Children':tree['Children'],
-            'GenerateChildren':True,
+            'GenerateChildren':tree['Children']
         }
+        tree['Group'].update(index_page["Group"])
         tree['Children'] = subtrees
 
     return tree
@@ -438,12 +504,16 @@ def meta_dir_format(val,meta):
         dirname = './'+os.path.dirname(val)
         return [f for f in os.listdir(dirname) if re.match(pattern,f)]
 
+def meta_str_format(val,meta):
+    return val
+
 META_FORMATS = {
     'dir':meta_dir_format,
     'jinja':meta_jinja_format,
     'csv':meta_csv_format,
     'jsonfile':meta_jsonfile_format,
-    'json':meta_json_format
+    'json':meta_json_format,
+    'str':meta_str_format
 }
 
 try:
@@ -481,28 +551,60 @@ try:
 except:
     pass
 
+try:
+    from dateutil import parser as dateparser
+    def parse_date(val):
+        return dateparser.parse(val)
+except:
+    def parse_date(val):
+        raise BaseException("Date Parser unavailable")
+
+def guess_meta_format(val,meta):
+    try:
+        return int(val)
+    except:
+        pass
+
+    try:
+        return float(val)
+    except:
+        pass
+
+    try:
+        return parse_date(val)
+    except:
+        pass
+
+    if re.match('True',val,re.IGNORECASE):
+        return True
+    if re.match('False',val,re.IGNORECASE):
+        return False
+
+    return val
 
 def add_key_to_meta(key,format,val,meta):
     if key is None:
         return
-    load_func = META_FORMATS.get(format,int)
+    load_func = META_FORMATS.get(format,guess_meta_format)
     try:
         meta[key]=load_func(val,meta)
+        if hasattr(load_func,'scan_assets'):
+            meta[key] = scan_html_for_assets(jinja_env,meta[key])
     except Exception,e:
-        if load_func is not int:
+        if load_func is not guess_meta_format:
             logger.error("Error parsing key '" +key+ "' (format:"+format+"), Exception: "+str(e))
             logger.warn("Unable to parse value '"+val+"'")
         meta[key]=val
 
+SECTION_DELIMITER_PATTERN=re.compile("(----*)|(\*\*\*\**)|(####*)|(%%%%*)")
+META_PATTERN=re.compile("""
+    \s*^-
+    (?P<key>[a-zA-Z]*)\s*               # Key
+    (?:\((?P<format>[^)]*)\))*\s*       # Optional format
+    :(?P<val>.*)                        # First line of value
+    """,re.VERBOSE
+)
 def load_file(file):
-    SECTION_DELIMITER_PATTERN=re.compile("(----*)|(\*\*\*\**)|(####*)|(%%%%*)")
-    META_PATTERN=re.compile("""
-        \s*^-
-        (?P<key>[a-zA-Z]*)\s*               # Key
-        (?:\((?P<format>[^)]*)\))*\s*       # Optional format
-        :(?P<val>.*)                        # First line of value
-        """,re.VERBOSE
-    )
     format = get_extension(file)
     meta={}
     current_key, current_val, current_format = None, '', None
@@ -550,6 +652,7 @@ def content_jinja_format(content,context):
     return render_from_string(content,context)
 
 
+
 CONTENT_FORMATS = {
     'html':content_asis_format,
     'jinja':content_jinja_format,
@@ -562,7 +665,15 @@ try:
     def content_md_format(content,context):
         return markdown.markdown(content)
 
+    def meta_md_format(val,meta):
+        return markdown.markdown(val)
+
+    content_md_format.scan_assets = True
+    meta_md_format.scan_assets = True
+
     CONTENT_FORMATS['md'] = content_md_format
+    META_FORMATS['md'] = meta_md_format
+
 except:
     pass
 
@@ -573,6 +684,8 @@ def render_node(node,global_ctx):
     formatter = CONTENT_FORMATS.get(node['Format'],content_asis_format)
     try:
         formated_content = formatter(node['Content'],node_context)
+        if hasattr(formatter,'scan_assets'):
+            formated_content = scan_html_for_assets(jinja_env, formated_content)
     except Exception, e:
         logger.error("Unable to format content of " + node['Name'] + " Exception:" + str(e))
         logger.warn("Offending content:" + node['Content'])
@@ -602,7 +715,7 @@ def process_tree(tree,global_ctx={},dest_path='./website',dry_run=False):
             ch_path = dest_path
         process_tree(child,global_ctx,ch_path,dry_run)
     if 'Group' in tree and 'GenerateChildren' in tree['Group']:
-        for child in tree['Group']['Children']:
+        for child in tree['Group']['GenerateChildren']:
             process_tree(child,global_ctx,dest_path,dry_run)
 
 
@@ -632,29 +745,55 @@ def parse_args():
   parser = argparse.ArgumentParser(description='A static website generator')
   parser.add_argument('command', choices=['compile','serve','list-assets','list-formats'])
   parser.add_argument('--verbose', '-v', action='count',help='be verbose',default=0)
-  parser.add_argument('--sources', '-s', help='the directory with source files',default='./source')
-  parser.add_argument('--templates', '-t', help='the directory with template files',default='./templates')
-  parser.add_argument('--website', '-w', help='the directory with the website',default='./website')
+  parser.add_argument('--sources', '-s', help='the directory with source files', default=None)
+  parser.add_argument('--templates', '-t', help='the directory with template files',default=None)
+  parser.add_argument('--website', '-w', help='the directory with the website',default=None)
   parser.add_argument('--config',help='the JSON file containing site configuration',default='./config.json')
   parser.add_argument('--context','-c',type=argparse.FileType('r'),help='additional global context')
   parser.add_argument('--port',type=int,help='the port to run the devel server on',default='8080')
+  parser.add_argument('--profile',help='the profile to choose',default=None)
+  parser.add_argument('--theme',help='use a theme',default=None)
+  parser.add_argument('--skipassets',help='do not copy assets',default=False)
 
   return parser.parse_args()
 
 def main():
     args = parse_args()
     logger.setLevel(logging.ERROR-args.verbose*10)
+    cfg = json.load(open(args.config))
+    if args.profile is None:
+        profile_name = cfg.get('default_profile',None)
+    else:
+        profile_name = args.profile
+
+    if profile_name is not None:
+        try:
+            profile = cfg.get('profiles',{})[profile_name]
+            cfg.update(profile)
+        except KeyError, e:
+            logger.fatal('No such profile '+ profile_name)
+            logger.fatal('Available profiles:'+' '.join(cfg.get('profiles',{}).keys()))
+            exit(1)
+
+    if args.sources is None:
+        args.sources=cfg.get('sources','source')
+    if args.templates is None:
+        args.templates=cfg.get('templates','templates')
+    if args.website is None:
+        args.website=cfg.get('website','website')
 
     if args.command == 'compile' or args.command == 'list-assets':
-        cfg = json.load(open(args.config))
+
         jinja_env.config = cfg
         jinja_env.filters['json']=json_filter
         jinja_env.filters['asset']=asset_filter
         jinja_env.filters['DOI']=doi_filter
+        jinja_env.filters['VIMEO']=vimeo_filter
+        jinja_env.filters['YOUTUBE']=youtube_filter
         jinja_env.filters['split']=split_filter
         jinja_env.tests['equalto']=equalto_test
         jinja_env.tests['not equalto']=equalto_test
-        jinja_env.loader=jinja2.FileSystemLoader(args.templates)
+        jinja_env.loader=jinja2.FileSystemLoader([args.templates])
         if 'assets' in cfg:
             jinja_env.assets = scan_assets(cfg['assets'])
         else:
@@ -664,7 +803,7 @@ def main():
         default_template_base = strip_extension(cfg.get('default_template','base.tpl'))
         tree = build_web_tree(args.sources,base_dir=args.sources,default_template_base=default_template_base)
 
-        global_ctx={}
+        global_ctx={'type':type}
         global_ctx['website']=tree
         global_ctx['config']=cfg
 
@@ -678,13 +817,14 @@ def main():
                 print "MISSING:"
                 print "\t\n".join(jinja_env.missing_assets.keys())
         else:
-            for (asset,data) in jinja_env.assets.items():
-                if data['copy']:
-                    dest=args.website+'/'+asset
-                    logger.info("Copying '"+data['src']+''" to '"+dest+"'")
-                    cp(data['src'],dest,create_parents=True,filters=data['filters'])
-                else:
-                    logger.info("Skipping '"+data['src']+"'")
+            if not args.skipassets:
+                for (asset,data) in jinja_env.assets.items():
+                    if data['copy']:
+                        dest=args.website+'/'+asset
+                        logger.info("Copying '"+data['src']+''" to '"+dest+"'")
+                        cp(data['src'],dest,create_parents=True,filters=data['filters'])
+                    else:
+                        logger.info("Skipping '"+data['src']+"'")
             if len(jinja_env.missing_assets) > 0:
                 logger.error("The following assets were not found:")
                 logger.error(';'.join(jinja_env.missing_assets.keys()))
