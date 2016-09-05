@@ -754,6 +754,7 @@ def parse_args():
   parser.add_argument('--verbose', '-v', action='count',help='be verbose',default=0)
   parser.add_argument('--sources', '-s', help='the directory with source files', default=None)
   parser.add_argument('--templates', '-t', help='the directory with template files',default=None)
+  parser.add_argument('--filters', help='the directory containing custom filters',default=None)
   parser.add_argument('--website', '-w', help='the directory with the website',default=None)
   parser.add_argument('--config',help='the JSON file containing site configuration',default='./config.json')
   parser.add_argument('--context','-c',type=argparse.FileType('r'),help='additional global context')
@@ -788,6 +789,8 @@ def main():
         args.templates=cfg.get('templates','templates')
     if args.website is None:
         args.website=cfg.get('website','website')
+    if args.filters is None:
+        args.filters=cfg.get('filters','filters')
 
     if args.command == 'compile' or args.command == 'list-assets':
 
@@ -798,6 +801,15 @@ def main():
         jinja_env.filters['VIMEO']=vimeo_filter
         jinja_env.filters['YOUTUBE']=youtube_filter
         jinja_env.filters['split']=split_filter
+        
+        try:
+            custom_filters = __import__(args.filters)
+            for f_name in custom_filters.__all__:
+                logger.info("Loading filter %s",f_name)
+                jinja_env.filters[f_name] = getattr(custom_filters,f_name)
+        except Exception as ex:
+            logger.error("Could not load custom filters: %s",repr(ex))
+            
         jinja_env.tests['equalto']=equalto_test
         jinja_env.tests['not equalto']=equalto_test
         jinja_env.loader=jinja2.FileSystemLoader([args.templates])
