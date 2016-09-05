@@ -667,6 +667,9 @@ try:
 
     def content_md_format(content,context):
         return markdown.markdown(content)
+    
+    def content_tmd_format(content,context):
+        return content_md_format(content_jinja_format(content,context),context)
 
     def meta_md_format(val,meta):
         return markdown.markdown(val)
@@ -675,6 +678,7 @@ try:
     meta_md_format.scan_assets = True
 
     CONTENT_FORMATS['md'] = content_md_format
+    CONTENT_FORMATS['tmd'] = content_tmd_format
     META_FORMATS['md'] = meta_md_format
 
 except:
