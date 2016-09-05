@@ -229,9 +229,12 @@ def find_template(tpl_name):
         test_name = '.'.join(parts[:i]+[tpl_extension])
         try:
             return jinja_env.get_template(test_name)
-        except:
+        except jinja2.TemplateNotFound:
             pass
-    raise BaseException("Template '"+tpl_name+"' not found")
+        except Exception as ex:
+            logger.error("Error parsing template: %s (%s)'",test_name,ex)
+    logger.critical("Template '%s' could not be loaded, giving up.",tpl_name)
+    exit(1)
 
 def render_template(tpl_name, context):
     if not tpl_name in template_cache:
