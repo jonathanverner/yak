@@ -665,11 +665,11 @@ CONTENT_FORMATS = {
 try:
     import markdown
 
-    def content_md_format(content,context):
-        return markdown.markdown(content)
-    
-    def content_tmd_format(content,context):
-        return content_md_format(content_jinja_format(content,context),context)
+    def content_md_format(content, context):
+        return markdown.markdown(content, extensions=['markdown.extensions.codehilite', 'markdown.extensions.fenced_code'])
+
+    def content_tmd_format(content, context):
+        return content_md_format(content_jinja_format(content, context), context)
 
     def meta_md_format(val,meta):
         return markdown.markdown(val)
