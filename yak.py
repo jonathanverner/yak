@@ -699,7 +699,13 @@ try:
     import markdown
 
     def content_md_format(content, context):
-        return markdown.markdown(content, extensions=['markdown.extensions.codehilite', 'markdown.extensions.fenced_code'])
+        return markdown.markdown(content, extensions=[
+            'markdown.extensions.codehilite',
+            'markdown.extensions.fenced_code',
+            'markdown.extensions.tables',
+            'markdown.extensions.attr_list',
+            'markdown.extensions.extra',
+        ])
 
     def content_tmd_format(content, context):
         return content_md_format(content_jinja_format(content, context), context)
