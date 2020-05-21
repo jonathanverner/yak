@@ -226,6 +226,8 @@ def vimeo_filter(video, color=None, width="700px", height="394px", title=False, 
 
 def doi_filter(value):
     return 'http://dx.doi.org/'+value
+def arxiv_filter(value):
+    return 'https://arxiv.org/abs/'+value
 
 
 def split_filter(value, delimiter=","):
@@ -829,6 +831,7 @@ def main():
         jinja_env.filters['json']=json_filter
         jinja_env.filters['asset']=asset_filter
         jinja_env.filters['DOI']=doi_filter
+        jinja_env.filters['ARXIV']=arxiv_filter
         jinja_env.filters['VIMEO']=vimeo_filter
         jinja_env.filters['YOUTUBE']=youtube_filter
         jinja_env.filters['split']=split_filter
