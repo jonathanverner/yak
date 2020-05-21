@@ -225,7 +225,8 @@ def vimeo_filter(video, color=None, width="700px", height="394px", title=False, 
 
 
 def doi_filter(value):
-    return 'http://dx.doi.org/'+value
+    return 'https://dx.doi.org/'+value
+
 def arxiv_filter(value):
     return 'https://arxiv.org/abs/'+value
 
