@@ -1,4 +1,4 @@
-Jinja2==2.11.2
+Jinja2==2.11.3
 latexcodec==2.0.0
 Markdown==3.1.1
 MarkupSafe==1.1.1
